@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ar">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>TrueGo – Test Payment (Testnet)</title>
+</head>
+<body>
+  <h1>TrueGo Testnet – Process a Transaction</h1>
+  <button id="pay">ادفع تجربة 0.01 π</button>
+  <pre id="log"></pre>
+
+  <script>
+    const log = (...a)=>{document.getElementById('log').textContent += a.join(' ') + "\n"}
+
+    // افتح داخل Pi Browser
+    if (window.Pi) { try { window.Pi.init({ version:"2.0", sandbox:true }); } catch(e){ log(e) } }
+    else { log("افتح الصفحة من داخل Pi Browser."); }
+
+    async function post(url, data){
+      const r = await fetch(url, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(data) });
+      const text = await r.text();
+      try { return JSON.parse(text); } catch { return { raw:text } }
+    }
+
+    document.getElementById('pay').onclick = async () => {
+      try {
+        const me = await window.Pi.authenticate(["username"], { onIncompletePaymentFound: ()=>{} });
+        log("User:", me?.user?.username || "unknown");
+
+        const paymentData = { amount: 0.01, memo: "TrueGo test payment", metadata: { checklist: true } };
+        const callbacks = {
+          onReadyForServerApproval: async (paymentId) => {
+            log("approve→", paymentId);
+            log(await post("/.netlify/functions/approve", { paymentId }));
+          },
+          onReadyForServerCompletion: async (paymentId, txid) => {
+            log("complete→", paymentId, txid);
+            log(await post("/.netlify/functions/complete", { paymentId, txid }));
+          },
+          onCancel: (paymentId) => log("cancel:", paymentId),
+          onError: (err, paymentId) => log("error:", paymentId, err?.message || err)
+        };
+
+        const payment = await window.Pi.createPayment(paymentData, callbacks);
+        const result = await payment.complete();
+        log("finished:", JSON.stringify(result));
+        alert("✅ تمت عملية الدفع التجريبية");
+      } catch (e) {
+        log("Exception:", e.message || e);
+        alert("حدث خطأ أثناء الدفع");
+      }
+    };
+  </script>
+</body>
+</html>
