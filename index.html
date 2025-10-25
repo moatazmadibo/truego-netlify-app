@@ -1,28 +1,128 @@
-<!doctype html><html lang="ar"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>TrueGo – Test Payment (Testnet)</title>
-<h1>TrueGo Testnet – Process a Transaction</h1>
-<button id="pay">ادفع تجربة 0.01 π</button>
-<pre id="log"></pre>
-<script>
-  const log=(...a)=>document.querySelector('#log').textContent+=a.join(' ')+"\n";
-  if(window.Pi){try{window.Pi.init({version:"2.0",sandbox:true});}catch(e){log(e)}}
-  else{log("افتح الصفحة من داخل Pi Browser.");}
-  async function post(u,d){const r=await fetch(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)});const t=await r.text();try{return JSON.parse(t)}catch{return{raw:t}}}
-  document.querySelector('#pay').onclick=async()=>{
-    try{
-      const me=await window.Pi.authenticate(["username"],{onIncompletePaymentFound:()=>{}});
-      log("User:",me?.user?.username||"unknown");
-      const data={amount:0.01,memo:"TrueGo test payment",metadata:{checklist:true}};
-      const cbs={
-        onReadyForServerApproval: async id=>{log("approve→",id);log(await post("/.netlify/functions/approve",{paymentId:id}));},
-        onReadyForServerCompletion: async (id,txid)=>{log("complete→",id,txid);log(await post("/.netlify/functions/complete",{paymentId:id,txid}));},
-        onCancel:id=>log("cancel:",id),
-        onError:(err,id)=>log("error:",id,err?.message||err)
-      };
-      const p=await window.Pi.createPayment(data,cbs);
-      const res=await p.complete();
-      log("finished:",JSON.stringify(res)); alert("✅ تمت عملية الدفع التجريبية");
-    }catch(e){log("Exception:",e.message||e); alert("حدث خطأ أثناء الدفع");}
-  };
-</script>
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TrueGo Testnet – Process a Transaction</title>
+
+  <!-- Pi SDK (يلزم فتح الصفحة عبر PiNet داخل Pi Browser ليظهر window.Pi) -->
+  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
+
+  <style>
+    body{font-family:system-ui,Segoe UI,Arial,sans-serif;max-width:900px;margin:40px auto;padding:0 16px;line-height:1.7}
+    h1{margin:0 0 8px}
+    .hint{color:#666;margin:4px 0 16px}
+    button{padding:10px 14px;border:1px solid #ddd;border-radius:10px;background:#f7f7f7;cursor:pointer}
+    pre{background:#0b1020;color:#e6edf3;padding:12px;border-radius:10px;overflow:auto;min-height:120px}
+    .ok{color:#0a7b0a}
+    .warn{color:#b58900}
+    .err{color:#b00020}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .pill{padding:2px 8px;border-radius:999px;background:#efefef;border:1px solid #e2e2e2;font-size:.9rem}
+  </style>
+</head>
+<body>
+
+  <h1>TrueGo Testnet – Process a Transaction</h1>
+  <div class="hint">اختبار الدفع التجريبي عبر <b>Pi Browser</b> وبيئة <b>Testnet</b>.</div>
+
+  <div class="row" style="margin:10px 0 18px">
+    <span id="envStatus" class="pill">التحقق من Pi SDK…</span>
+    <span id="userTag" class="pill">المستخدم: -</span>
+  </div>
+
+  <button id="pay">ادفع تجربة 0.01 π</button>
+
+  <h3 style="margin-top:24px">السجل</h3>
+  <pre id="log"></pre>
+
+  <script>
+    // عناصر واجهة لعرض الحالة
+    const $log = document.getElementById('log');
+    const $env = document.getElementById('envStatus');
+    const $user = document.getElementById('userTag');
+    const log = (...a)=>{ $log.textContent += a.join(' ') + "\n"; $log.scrollTop = $log.scrollHeight; };
+
+    // فحص وجود Pi SDK وتهيئته في Testnet
+    function ensurePi() {
+      if (!window.Pi) {
+        $env.textContent = "⚠️ لم يتم العثور على Pi SDK";
+        $env.className = "pill warn";
+        log("⚠️ لم يتم العثور على Pi SDK. افتح التطبيق عبر PiNet subdomain داخل Pi Browser.");
+        alert("فضلاً افتح الرابط عبر PiNet داخل Pi Browser (الرابط الذي ينتهي بـ minepiapp.dev).");
+        throw new Error("Pi SDK missing");
+      }
+      try {
+        window.Pi.init({ version: "2.0", sandbox: true }); // Testnet
+        $env.textContent = "✅ Pi SDK جاهز (Testnet)";
+        $env.className = "pill ok";
+      } catch (e) {
+        $env.textContent = "❌ خطأ في تهيئة Pi SDK";
+        $env.className = "pill err";
+        log("init error:", e?.message || e);
+        throw e;
+      }
+    }
+
+    // مساعد إرسال POST إلى فنكشنز Netlify
+    async function post(url, data){
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data)
+      });
+      const t = await r.text();
+      try { return JSON.parse(t); } catch { return { raw: t }; }
+    }
+
+    // جرّب قراءة SDK مباشرة عند فتح الصفحة لعرض الحالة
+    (function boot(){
+      try { ensurePi(); } catch(_) {}
+    })();
+
+    // زر الدفع التجريبي
+    document.getElementById('pay').onclick = async () => {
+      try {
+        ensurePi();
+
+        // مصادقة خفيفة لعرض اسم المستخدم
+        const me = await window.Pi.authenticate(["username"], { onIncompletePaymentFound: ()=>{} });
+        const uname = me?.user?.username || "-";
+        $user.textContent = "المستخدم: " + uname;
+
+        // بيانات الدفع
+        const paymentData = {
+          amount: 0.01,
+          memo: "TrueGo test payment",
+          metadata: { checklist: true }
+        };
+
+        // ردود الاستدعاء (callbacks)
+        const callbacks = {
+          onReadyForServerApproval: async (paymentId) => {
+            log("onReadyForServerApproval →", paymentId);
+            const resp = await post("/.netlify/functions/approve", { paymentId });
+            log("approve →", JSON.stringify(resp));
+          },
+          onReadyForServerCompletion: async (paymentId, txid) => {
+            log("onReadyForServerCompletion →", paymentId, txid);
+            const resp = await post("/.netlify/functions/complete", { paymentId, txid });
+            log("complete →", JSON.stringify(resp));
+          },
+          onCancel: (paymentId) => log("cancel →", paymentId),
+          onError: (err, paymentId) => log("error →", paymentId, (err && (err.message||err)) )
+        };
+
+        // إنشاء العملية وإكمالها
+        const payment = await window.Pi.createPayment(paymentData, callbacks);
+        const result = await payment.complete();
+        log("finished →", JSON.stringify(result));
+        alert("✅ تمت عملية الدفع التجريبية");
+      } catch (e) {
+        log("Exception:", e?.message || e);
+        alert("حدث خطأ أثناء الدفع");
+      }
+    };
+  </script>
+</body>
 </html>
